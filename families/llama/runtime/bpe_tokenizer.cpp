@@ -655,10 +655,11 @@ class BpeTokenizer final : public ITokenizer {
         return tokenizer;
     }
 
-    void encode_segment(const std::string& text, std::vector<int32_t>& result) const {
+    void encode_segment(const std::string& text, std::vector<int32_t>& result,
+                        bool first_segment) const {
         const auto normalized = normalize_text(text);
         if (mIsSentencePiece) {
-            encode_sentencepiece(normalized, result);
+            encode_sentencepiece(normalized, result, first_segment);
         } else if (mIsMetaspace) {
             encode_metaspace(normalized, result);
         } else {
@@ -667,24 +668,30 @@ class BpeTokenizer final : public ITokenizer {
     }
 
     std::vector<int32_t> encode(const std::string& text) const override {
+        return encode(text, mAddSpecialTokens);
+    }
+
+    std::vector<int32_t> encode(const std::string& text, bool add_special_tokens) const override {
         std::vector<int32_t> result;
         if (text.empty())
             return result;
 
-        if (mAddSpecialTokens) {
+        if (add_special_tokens) {
             for (int32_t bos_id : mPostBosIds)
                 result.push_back(bos_id);
         }
 
         auto segments = split_added_tokens(text);
+        bool first_segment = true;
         for (const auto& seg : segments) {
             if (seg.added_id >= 0)
                 result.push_back(seg.added_id);
             else
-                encode_segment(seg.text, result);
+                encode_segment(seg.text, result, first_segment);
+            first_segment = false;
         }
 
-        if (mAddSpecialTokens) {
+        if (add_special_tokens) {
             for (int32_t eos_id : mPostEosIds)
                 result.push_back(eos_id);
         }
@@ -823,7 +830,7 @@ class BpeTokenizer final : public ITokenizer {
     // SentencePiece-style encode: replace spaces with ▁, split to chars, BPE merge.
     // Used for Metaspace pre-tokenizer and Sequence decoder models (LLaMA, Mistral, Phi-3).
     // Normalize text for SentencePiece: replace spaces with ▁, handle prepend
-    std::string normalize_sentencepiece(const std::string& text) const {
+    std::string normalize_sentencepiece(const std::string& text, bool first_segment) const {
         static const std::string sp = "\xe2\x96\x81"; // U+2581
         std::string out;
         if (mSentencePiecePrependAlways) {
@@ -833,15 +840,17 @@ class BpeTokenizer final : public ITokenizer {
             out += (c == ' ') ? sp : std::string(1, c);
         }
         // Metaspace prepend_scheme=first: prepend if not already starting with ▁
-        if (!mSentencePiecePrependAlways && mSentencePiecePrependIfMissing &&
+        if (!mSentencePiecePrependAlways &&
+            (mSentencePiecePrependIfMissing || (mSentencePiecePrependFirst && first_segment)) &&
             (out.empty() || out.compare(0, sp.size(), sp) != 0)) {
             out = sp + out;
         }
         return out;
     }
 
-    void encode_sentencepiece(const std::string& text, std::vector<int32_t>& result) const {
-        std::string normalized = normalize_sentencepiece(text);
+    void encode_sentencepiece(const std::string& text, std::vector<int32_t>& result,
+                              bool first_segment) const {
+        std::string normalized = normalize_sentencepiece(text, first_segment);
 
         // Split into UTF-8 characters
         std::vector<std::string> chars;
@@ -1317,6 +1326,16 @@ class BpeTokenizer final : public ITokenizer {
         } else if (pt_type == "Metaspace") {
             mIsMetaspace = true;
             mUsePreTokenizer = false;
+            if (pt.contains("prepend_scheme")) {
+                const auto scheme = pt.at("prepend_scheme").get<std::string>();
+                if (pt.value("replacement", std::string("▁")) != "▁")
+                    throw std::runtime_error("Unsupported Metaspace replacement");
+                if (scheme != "first" && scheme != "always" && scheme != "never")
+                    throw std::runtime_error("Unsupported Metaspace prepend_scheme: " + scheme);
+                mSentencePiecePrependAlways = false;
+                mSentencePiecePrependIfMissing = scheme == "always";
+                mSentencePiecePrependFirst = scheme == "first";
+            }
         } else if (pt_type.empty()) {
             mUsePreTokenizer = false;
         } else {
@@ -1579,6 +1598,7 @@ class BpeTokenizer final : public ITokenizer {
     bool mSentencePiecePrependAlways =
         false; // true for Normalizer Prepend, false for Metaspace first
     bool mSentencePiecePrependIfMissing = true;
+    bool mSentencePiecePrependFirst = false;
     bool mByteFallback = false;
     bool mNormalizeLowercase = false;
     bool mNormalizeWhitespace = false;

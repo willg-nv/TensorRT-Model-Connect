@@ -105,4 +105,13 @@ std::string llama_apply_chat_template(const std::string& format, const std::stri
     return prompt;
 }
 
+std::vector<std::int32_t> llama_encode_prompt(const ITokenizer& tokenizer,
+                                              const std::string& format, const std::string& prompt,
+                                              bool use_chat_template, bool enable_thinking) {
+    if (!use_chat_template || format.empty())
+        return tokenizer.encode(prompt);
+    // The rendered template owns all framing, including any embedded BOS.
+    return tokenizer.encode(llama_apply_chat_template(format, prompt, enable_thinking), false);
+}
+
 } // namespace trtmc

@@ -41,6 +41,16 @@ install(TARGETS trtmc_model_llama
 )
 
 if(TRTMC_BUILD_TESTS)
+  # CPU preprocessing regression: no backend or GPU dependency.
+  add_executable(test_llama_prompt_encoding
+    ${PROJECT_SOURCE_DIR}/families/llama/tests/cpp/test_llama_prompt_encoding.cpp
+    bpe_tokenizer.cpp
+    chat_templates.cpp
+  )
+  target_include_directories(test_llama_prompt_encoding PRIVATE ${PROJECT_SOURCE_DIR})
+  target_link_libraries(test_llama_prompt_encoding PRIVATE nlohmann_json::nlohmann_json)
+  add_test(NAME test_llama_prompt_encoding COMMAND test_llama_prompt_encoding)
+
   add_executable(llama_speculative_validation
     ${PROJECT_SOURCE_DIR}/families/llama/tests/cpp/speculative_validation.cpp)
   add_executable(llama_speculative_benchmark

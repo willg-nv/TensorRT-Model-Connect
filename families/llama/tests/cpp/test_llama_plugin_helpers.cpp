@@ -38,7 +38,7 @@ std::string tokenizer_json() {
       "model": {
         "type": "BPE",
         "unk_token": "<unk>",
-        "vocab": {"<unk>": 0, "<s>": 1, "</s>": 2, "\u2581": 3, "h": 4, "e": 5},
+        "vocab": {"<unk>": 0, "<s>": 1, "</s>": 2, "\u2581": 3, "h": 4, "e": 5, "\n": 6},
         "merges": []
       },
       "added_tokens": [
@@ -70,15 +70,20 @@ std::string byte_level_tokenizer_json() {
     })";
 }
 
-std::filesystem::path write_tokenizer_bundle(std::string_view tokenizer) {
+std::filesystem::path write_tokenizer_bundle(std::string_view tokenizer,
+                                             std::string_view config = {}) {
     char path[] = "/tmp/trtmc_llama_plugin_helpers_XXXXXX";
     const int descriptor = mkstemp(path);
     if (descriptor < 0)
         throw std::runtime_error("mkstemp failed");
     close(descriptor);
-    const std::string header =
+    std::string header =
         R"({"format":1,"family":"llama","task":"text_generation","backend":"trt","sections":{"tokenizer.json":{"offset":0,"length":)" +
-        std::to_string(tokenizer.size()) + "}}}";
+        std::to_string(tokenizer.size()) + "}";
+    if (!config.empty())
+        header += R"(,"tokenizer_config.json":{"offset":)" + std::to_string(tokenizer.size()) +
+                  R"(,"length":)" + std::to_string(config.size()) + "}";
+    header += "}}";
     static constexpr unsigned char magic[8] = {'B', 'U', 'N', 'D', 'L', 'E', '\x01', '\0'};
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output.write(reinterpret_cast<const char*>(magic), sizeof(magic));
@@ -87,6 +92,7 @@ std::filesystem::path write_tokenizer_bundle(std::string_view tokenizer) {
         output.put(static_cast<char>((header_size >> shift) & 0xffU));
     output.write(header.data(), static_cast<std::streamsize>(header.size()));
     output.write(tokenizer.data(), static_cast<std::streamsize>(tokenizer.size()));
+    output.write(config.data(), static_cast<std::streamsize>(config.size()));
     output.close();
     return path;
 }
@@ -124,12 +130,65 @@ void test_byte_level_decode_replaces_incomplete_utf8() {
           "byte-level decode preserves a complete UTF-8 sequence");
 }
 
+void test_nonlegacy_wrapper_respects_added_token_boundary() {
+    const auto path = write_tokenizer_bundle(
+        tokenizer_json(), R"({"tokenizer_class":"LlamaTokenizer","legacy":false})");
+    try {
+        const trtmc::BundleReader bundle(path.string());
+        const auto tokenizer = trtmc::llama::create_tokenizer(bundle);
+        check_ids(tokenizer->encode("he</s>\nhe", false), {3, 4, 5, 2, 6, 4, 5},
+                  "nonlegacy prefix is added only at the start of input");
+        check_ids(tokenizer->encode("</s>he", false), {2, 4, 5},
+                  "a leading special token prevents synthetic prefix on following text");
+        check_ids(tokenizer->encode("he"), {1, 3, 4, 5},
+                  "nonlegacy raw input retains BOS and initial prefix");
+    } catch (...) {
+        std::filesystem::remove(path);
+        throw;
+    }
+    std::filesystem::remove(path);
+}
+
+void test_nonlegacy_wrapper_can_disable_prefix_space() {
+    const auto path = write_tokenizer_bundle(
+        tokenizer_json(),
+        R"({"tokenizer_class":"LlamaTokenizer","legacy":false,"add_prefix_space":false})");
+    try {
+        const auto tokenizer = trtmc::llama::create_tokenizer(trtmc::BundleReader(path.string()));
+        check_ids(tokenizer->encode("he</s>he", false), {4, 5, 2, 4, 5},
+                  "nonlegacy add_prefix_space=false preserves content without a prefix");
+        check_ids(tokenizer->encode(" he", false), {3, 4, 5},
+                  "disabling prefix keeps an explicit input space");
+    } catch (...) {
+        std::filesystem::remove(path);
+        throw;
+    }
+    std::filesystem::remove(path);
+}
+
+void test_legacy_wrapper_preserves_segment_prefixes() {
+    const auto path = write_tokenizer_bundle(
+        tokenizer_json(), R"({"tokenizer_class":"LlamaTokenizer","legacy":true})");
+    try {
+        const auto tokenizer = trtmc::llama::create_tokenizer(trtmc::BundleReader(path.string()));
+        check_ids(tokenizer->encode("he</s>\nhe", false), {3, 4, 5, 2, 3, 6, 4, 5},
+                  "legacy segmentation preserves its existing prefix policy");
+    } catch (...) {
+        std::filesystem::remove(path);
+        throw;
+    }
+    std::filesystem::remove(path);
+}
+
 } // namespace
 
 int main() {
     test_exact_special_frame_uses_bundle_tokenizer();
     test_exact_special_frame_respects_add_special_false();
     test_byte_level_decode_replaces_incomplete_utf8();
+    test_nonlegacy_wrapper_respects_added_token_boundary();
+    test_nonlegacy_wrapper_can_disable_prefix_space();
+    test_legacy_wrapper_preserves_segment_prefixes();
     if (failures != 0)
         std::cerr << failures << " Llama plugin-helper test(s) failed\n";
     return failures;

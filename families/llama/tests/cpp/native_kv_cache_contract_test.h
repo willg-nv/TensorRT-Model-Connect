@@ -23,6 +23,7 @@ namespace trtmc::test {
 class NativeKvTokenizer final : public ITokenizer {
   public:
     std::vector<std::int32_t> encode(const std::string&) const override { return {}; }
+    std::vector<std::int32_t> encode(const std::string&, bool) const override { return {}; }
     std::string decode(const std::vector<std::int32_t>&) const override { return {}; }
     std::int32_t id_for_token(std::string_view) const override { return -1; }
     std::string token_for_id(std::int32_t) const override { return {}; }

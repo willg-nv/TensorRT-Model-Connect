@@ -58,6 +58,9 @@ class StreamFixture {
 class MockTokenizer final : public trtmc::ITokenizer {
   public:
     std::vector<std::int32_t> encode(const std::string&) const override { return {9}; }
+    std::vector<std::int32_t> encode(const std::string& text, bool) const override {
+        return encode(text);
+    }
 
     std::string decode(const std::vector<std::int32_t>& ids) const override {
         std::string text;
