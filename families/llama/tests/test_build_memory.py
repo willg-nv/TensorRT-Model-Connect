@@ -4,6 +4,7 @@
 """CPU coverage of build memory lifetime and bundle publication."""
 
 import gc
+from dataclasses import replace
 import importlib.util
 import json
 from pathlib import Path
@@ -119,6 +120,63 @@ def test_decode_failure_preserves_published_bundle(request_and_writer, monkeypat
     writer.abort()
     assert request.output_path.read_bytes() == b"previous bundle"
     assert not list(request.output_path.parent.glob(".model.bundle.sections.*"))
+
+
+@pytest.mark.parametrize("length", [16.75, 16.0, True])
+def test_sequence_length_is_not_silently_coerced(request_and_writer, monkeypatch, length):
+    model, request, writer = request_and_writer
+    request = replace(request, max_sequence_length=length)
+    monkeypatch.setattr(
+        model, "load_standard_weights", lambda *a, **kw: pytest.fail("weights loaded")
+    )
+    with pytest.raises(ValueError, match="max_sequence_length must be a positive integer"):
+        model.build(request, writer)
+
+
+@pytest.mark.parametrize("length,expected", [(16, 16), (None, 32), (np.int64(16), 16)])
+def test_sequence_length_preserves_explicit_integer_and_default(
+    request_and_writer, monkeypatch, length, expected
+):
+    model, request, writer = request_and_writer
+    request = replace(request, max_sequence_length=length)
+    seen = []
+
+    def engine(config, weights, capacity, **options):
+        seen.append((config.raw["_decoder_engine_role"], capacity, options["precision"]))
+        return b"diagnostic plan placeholder"
+
+    monkeypatch.setattr(model, "_build_engine", engine)
+    model.build(request, writer)
+    assert seen == [("prefill", expected, "fp16"), ("decode", expected, "fp16")]
+
+
+@pytest.mark.parametrize("options,error,match", [
+    ({"task": "image_classification"}, ValueError, "task=text_generation"),
+    ({"precision": "int8"}, ValueError, "precision must be"),
+    ({"tensor_parallel_size": 2}, NotImplementedError, "tensor-parallel"),
+    ({"max_batch_size": 2}, NotImplementedError, "max_batch_size"),
+    ({"context_parallel_size": 2}, NotImplementedError, "context_parallel_size"),
+    ({"image_height": 16}, NotImplementedError, "image_height"),
+    ({"image_width": 16}, NotImplementedError, "image_width"),
+    ({"video_num_frames": 2}, NotImplementedError, "video_num_frames"),
+    ({"mtp_seq_len": 2}, NotImplementedError, "mtp_seq_len"),
+    ({"max_sequence_length": 33}, ValueError, "context capacity"),
+    ({"quantization": "int8"}, NotImplementedError, "quantization"),
+    ({"quantization": "fp8", "dynamic_kv_cache": True}, NotImplementedError,
+     "quantized Llama builds"),
+    ({"quantization": "nvfp4", "fp32_layers": (0,)}, NotImplementedError,
+     "quantized Llama builds"),
+])
+def test_unsupported_request_fails_before_weight_loading(
+    request_and_writer, monkeypatch, options, error, match
+):
+    model, request, writer = request_and_writer
+    request = replace(request, **options)
+    monkeypatch.setattr(
+        model, "load_standard_weights", lambda *a, **kw: pytest.fail("weights loaded")
+    )
+    with pytest.raises(error, match=match):
+        model.build(request, writer)
 
 
 @pytest.mark.parametrize("precision,fp32_layers", [("fp16", ()), ("fp32", ()), ("fp16", (1,))])

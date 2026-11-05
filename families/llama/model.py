@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import operator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,7 +56,7 @@ def _positive_int(value: object, name: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be a positive integer")
     try:
-        result = int(value)
+        result = operator.index(value)
     except (TypeError, ValueError, OverflowError) as error:
         raise ValueError(f"{name} must be a positive integer") from error
     if result < 1:
