@@ -7,16 +7,36 @@
   "task": "text_generation",
   "precision": "fp16",
   "trust_remote_code": false,
+  "checkpoint_files": [
+    "config.json",
+    "generation_config.json",
+    "model.safetensors",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer.model",
+    "tokenizer_config.json"
+  ],
   "testcases": [
     {
       "name": "tinyllama-1.1b",
+      "premerge": true,
       "reference_precision": "fp32",
       "prompt": "What is the capital of France? Answer in one word.",
       "max_new_tokens": 10,
       "use_chat_template": true,
       "enable_thinking": false
+    },
+    {
+      "name": "tinyllama-1.1b-raw",
+      "premerge": true,
+      "reference_precision": "fp32",
+      "prompt": "What is the capital of France? Answer in one word.",
+      "max_new_tokens": 10,
+      "use_chat_template": false,
+      "enable_thinking": false
     }
   ],
   "max_sequence_length": 256,
+  "max_batch_size": 1,
   "tensor_parallel_size": 1
 }

@@ -118,6 +118,8 @@ def _checkpoint(manifest: dict) -> Path:
         )
     )
     assert (path / "config.json").is_file(), path
+    for filename in manifest.get("checkpoint_files", ()):
+        assert (path / filename).is_file(), f"missing declared checkpoint input: {filename}"
     return path
 
 
@@ -156,6 +158,7 @@ def _build_bundle(manifest: dict, model_dir: Path, bundle: Path) -> None:
             task="text_generation",
             precision=manifest["precision"],
             max_sequence_length=manifest["max_sequence_length"],
+            max_batch_size=manifest.get("max_batch_size", 1),
             tensor_parallel_size=manifest["tensor_parallel_size"],
             quantization=quantization,
             fp32_layers=fp32_layers,

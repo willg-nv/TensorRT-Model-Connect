@@ -44,6 +44,14 @@ def test_offline_checkpoint_requires_config(staged_snapshot: Path) -> None:
         _checkpoint(_MANIFEST)
 
 
+def test_checkpoint_requires_declared_inputs(staged_snapshot: Path) -> None:
+    manifest = {**_MANIFEST, "checkpoint_files": ["config.json", "tokenizer.json"]}
+    with pytest.raises(AssertionError, match="missing declared checkpoint input: tokenizer.json"):
+        _checkpoint(manifest)
+    (staged_snapshot / "tokenizer.json").write_text("{}", encoding="utf-8")
+    assert _checkpoint(manifest) == staged_snapshot
+
+
 def test_online_checkpoint_allows_download(
     staged_snapshot: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
