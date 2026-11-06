@@ -57,11 +57,39 @@ def test_online_checkpoint_allows_download(
 ) -> None:
     monkeypatch.setattr(constants, "HF_HUB_OFFLINE", False)
 
-    def download(*, repo_id: str, revision: str, local_files_only: bool = False) -> str:
+    def download(*, repo_id: str, revision: str, allow_patterns,
+                 local_files_only: bool = False) -> str:
         assert repo_id == _MANIFEST["hf_id"]
         assert revision == _REVISION
         assert not local_files_only
+        assert "*.safetensors" in allow_patterns
+        assert "*.json" in allow_patterns
+        assert "*.py" not in allow_patterns
         return str(staged_snapshot)
 
     monkeypatch.setattr(huggingface_hub, "snapshot_download", download)
     assert _checkpoint(_MANIFEST) == staged_snapshot
+
+
+@pytest.mark.parametrize('missing', [None, 'model.safetensors', 'tokenizer.json'])
+def test_filtered_snapshot_with_full_tree_retains_required_data(
+        staged_snapshot: Path, missing):
+    import json
+    from huggingface_hub.errors import IncompleteSnapshotError
+
+    files = ['config.json', 'model.safetensors', 'tokenizer.json',
+             'README.md', 'modeling_custom.py', 'pytorch_model.bin']
+    tree = staged_snapshot.parent.parent / 'trees'
+    tree.mkdir()
+    (tree / f'{_REVISION}.json').write_text(json.dumps({
+        'format_version': 1,
+        'files': {name: {'size': 2, 'blob_id': 'b' * 40} for name in files},
+    }))
+    for name in ('model.safetensors', 'tokenizer.json'):
+        if name != missing:
+            (staged_snapshot / name).write_text('{}')
+    if missing:
+        with pytest.raises(IncompleteSnapshotError):
+            _checkpoint(_MANIFEST)
+    else:
+        assert _checkpoint(_MANIFEST) == staged_snapshot

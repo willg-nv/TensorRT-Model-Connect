@@ -126,7 +126,10 @@ def _checkpoint(manifest: dict) -> Path:
         snapshot_download(
             repo_id=manifest["hf_id"],
             revision=manifest.get("hf_revision"),
-            # Pinned snapshots staged by older clients lack remote tree metadata.
+            # Match operator provisioning: weights and tokenizer/config data.
+            # Requesting the whole repo makes safe filtered caches appear
+            # incomplete when Hub clients retain the full remote tree listing.
+            allow_patterns=["*.safetensors", "*.json", "*.model", "*.txt", "*.tiktoken", "*.jinja"],
             local_files_only=constants.HF_HUB_OFFLINE,
         )
     )
