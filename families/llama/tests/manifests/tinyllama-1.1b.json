@@ -33,7 +33,11 @@
       "prompt": "What is the capital of France? Answer in one word.",
       "max_new_tokens": 10,
       "use_chat_template": false,
-      "enable_thinking": false
+      "enable_thinking": false,
+      "expected_termination": "eos_only",
+      "expected_continuation_token_ids": [
+        2
+      ]
     },
     {
       "name": "tinyllama-1.1b-raw-continuation",

@@ -5,6 +5,7 @@
 import pytest
 
 from families.llama.tests.reference_contract import self_check
+from families.llama.tests.test_e2e import _assert_correctness
 
 
 def test_existing_nonempty_oracle_still_rejects_eos_only_reference():
@@ -22,3 +23,32 @@ def test_nonempty_reference_must_also_meet_its_semantic_assertions():
 @pytest.mark.parametrize('ids,text', [([], 'Paris'), ([1, 2, 3], 'Paris')])
 def test_reference_retains_token_count_contract(ids, text):
     assert self_check({'max_new_tokens': 2}, {}, ids, text)['status'] == 'failed'
+
+
+def test_explicit_eos_reference_contract_accepts_only_declared_termination():
+    case = {'max_new_tokens': 10, 'expected_termination': 'eos_only',
+            'expected_continuation_token_ids': [2]}
+    assert self_check(case, {}, [2], '')['status'] == 'passed'
+    assert self_check(case, {}, [3], '')['status'] == 'failed'
+
+
+@pytest.mark.parametrize('native_ids,native_text,reference_ids,reference_text,decoded', [
+    ([3], '', [2], '', ''),
+    ([2], '', [3], '', ''),
+    ([2, 2], '', [2], '', ''),
+    ([2], 'unexpected', [2], '', ''),
+    ([2], '', [2], 'unexpected', ''),
+    ([2], '', [2], '', 'unexpected'),
+])
+def test_eos_native_contract_rejects_inexact_agreement(
+        native_ids, native_text, reference_ids, reference_text, decoded):
+    case = {'max_new_tokens': 10, 'expected_termination': 'eos_only',
+            'expected_continuation_token_ids': [2]}
+    with pytest.raises(AssertionError):
+        _assert_correctness({'token_ids': native_ids, 'text': native_text}, case, {},
+                            reference_ids, reference_text, None, decoded)
+
+
+def test_unknown_termination_contract_is_rejected():
+    assert self_check({'max_new_tokens': 10, 'expected_termination': 'unknown'},
+                      {}, [10], 'Paris')['status'] == 'failed'

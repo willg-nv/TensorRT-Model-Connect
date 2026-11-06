@@ -36,9 +36,24 @@ def test_tinyllama_exact_manifest_and_unchanged_chat_oracle(tinyllama_cases):
         "use_chat_template": True,
         "enable_thinking": False,
     }
-    assert raw == {**chat, "name": "tinyllama-1.1b-raw", "use_chat_template": False}
+    assert raw == {**chat, "name": "tinyllama-1.1b-raw", "use_chat_template": False,
+                   "expected_termination": "eos_only", "expected_continuation_token_ids": [2]}
     assert _text_threshold(chat, {}) == 0.15
     assert _text_threshold(raw, {}) == 0.25
+
+
+def test_tinyllama_retains_a_nonempty_raw_continuation(tinyllama_cases):
+    manifest, _, _ = tinyllama_cases
+    continuation_manifest, case = _CASES["tinyllama-1.1b-raw-continuation"]
+    assert continuation_manifest is manifest
+    assert [c['name'] for c in manifest['testcases']] == [
+        'tinyllama-1.1b', 'tinyllama-1.1b-raw', 'tinyllama-1.1b-raw-continuation']
+    assert case == {
+        'name': 'tinyllama-1.1b-raw-continuation', 'premerge': True,
+        'reference_precision': 'fp32', 'prompt': 'The capital of France is',
+        'max_new_tokens': 10, 'use_chat_template': False, 'enable_thinking': False,
+        'expected_answers': ['Paris'],
+    }
 
 
 @pytest.mark.parametrize("mode", ["chat", "raw"])

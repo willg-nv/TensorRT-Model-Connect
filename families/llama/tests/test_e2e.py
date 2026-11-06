@@ -606,6 +606,14 @@ def _assert_correctness(
         assert any(answer.casefold() in actual_decoded.casefold() for answer in expected_answers)
 
     del sampling_support
+    termination = case.get("expected_termination", "nonempty")
+    if termination == "eos_only":
+        # Explicit reviewed EOS case; all default cases still require text.
+        assert case["expected_continuation_token_ids"] == [2]
+        assert actual_ids == reference_ids == [2]
+        assert actual_text == reference_text.strip() == actual_decoded.strip() == ""
+        return
+    assert termination == "nonempty", "unknown declared termination contract"
     assert actual_text
     assert _normalized_edit_distance(actual_text, reference_text) <= _text_threshold(
         case, thresholds
