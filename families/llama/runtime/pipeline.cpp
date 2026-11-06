@@ -7,6 +7,7 @@
 
 #include "families/llama/runtime/chat_templates.h"
 #include "families/llama/runtime/kv_cache.h"
+#include "families/llama/runtime/logits_trace.h"
 #include "families/llama/runtime/tensor_names.h"
 
 #include <algorithm>
@@ -331,8 +332,10 @@ int32_t LlamaTextGenerationPipeline::run_decode_loop(
     int32_t prompt_token_count) {
     const int32_t vocab_size = static_cast<int32_t>(logits.size());
     const int32_t stop_interval = std::max(cfg.stop_check_interval, 1);
+    LlamaLogitsTrace trace(std::getenv("TRTMC_LLAMA_LOGITS_TRACE"));
     int32_t steps = 0;
     for (int32_t step = 0; step < max_new_tokens; ++step) {
+        trace.record(output, logits);
         const LlamaSampleResult result = sampler->sample(logits.data(), vocab_size, params);
         const bool is_eos = result.is_eos || llama_is_eos_token(params, result.token_id);
         output.push_back(result.token_id);

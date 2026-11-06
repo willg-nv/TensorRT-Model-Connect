@@ -8,6 +8,7 @@ from __future__ import annotations
 from tools.e2e_evidence import evidence_stage, record_evidence
 
 import gc
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -287,9 +288,13 @@ def _run_native(
     case: dict,
     tp_size: int,
     tmp_path: Path,
+    *,
+    logits_trace: Path | None = None,
 ) -> dict:
     command = [str(binary), *_native_arguments(bundle, runtime_root, prompt, case)]
     environment = dict(os.environ)
+    if logits_trace is not None:
+        environment['TRTMC_LLAMA_LOGITS_TRACE'] = str(logits_trace)
     if tp_size > 1:
         environment["TRTMC_NCCL_RENDEZVOUS"] = str(tmp_path / "nccl.rendezvous")
         prefix = ["mpirun", "--tag-output", "-np", str(tp_size)]
@@ -627,6 +632,9 @@ def _assert_correctness(
 def test_e2e(case_name: str, request, tmp_path: Path) -> None:
     manifest, case = _CASES[case_name]
     _require_selected(case_name, manifest, request.config)
+    from .precision_diagnostics import capture_typed_graphs, compare_captured_scores, requested_profile
+
+    precision_diagnostic = requested_profile(manifest)
     record_evidence("inputs", {"manifest": manifest, "case": _CASES[case_name][-1]})
     tp_size = manifest["tensor_parallel_size"]
     binary, runtime_root, torch = _required_environment(tp_size)
@@ -651,7 +659,10 @@ def test_e2e(case_name: str, request, tmp_path: Path) -> None:
         runtime_root = _isolated_runtime(runtime_root, tmp_path / "runtime")
 
     with evidence_stage("build"):
-        _build_bundle(manifest, model_dir, bundle)
+        observation = (capture_typed_graphs(tmp_path / 'typed-graphs.json')
+                       if precision_diagnostic else nullcontext())
+        with observation:
+            _build_bundle(manifest, model_dir, bundle)
     with evidence_stage("compare"):
         inspection = _assert_rank_sections(binary, bundle, tp_size)
         provenance = inspection.get("provenance")
@@ -674,6 +685,7 @@ def test_e2e(case_name: str, request, tmp_path: Path) -> None:
             case,
             tp_size,
             tmp_path,
+            logits_trace=tmp_path / 'native-logits.jsonl' if precision_diagnostic else None,
         )
     record_evidence("native", payload)
     reruns = int(case.get("determinism_reruns", 0))
@@ -743,5 +755,10 @@ def test_e2e(case_name: str, request, tmp_path: Path) -> None:
         }
         (tmp_path / "comparison.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
         record_evidence("comparison_metrics", metrics)
+    if precision_diagnostic:
+        with evidence_stage('reference'):
+            diagnostic = compare_captured_scores(
+                model_dir, manifest, case, payload['token_ids'], tmp_path)
+        record_evidence('precision_diagnostics', diagnostic)
     with evidence_stage("compare"):
         _assert_correctness(payload, case, record_evidence("thresholds", _thresholds(case_name)), *reference)
