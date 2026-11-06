@@ -34,6 +34,18 @@
       "max_new_tokens": 10,
       "use_chat_template": false,
       "enable_thinking": false
+    },
+    {
+      "name": "tinyllama-1.1b-raw-continuation",
+      "premerge": true,
+      "reference_precision": "fp32",
+      "prompt": "The capital of France is",
+      "max_new_tokens": 10,
+      "use_chat_template": false,
+      "enable_thinking": false,
+      "expected_answers": [
+        "Paris"
+      ]
     }
   ],
   "max_sequence_length": 256,

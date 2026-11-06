@@ -15,6 +15,8 @@ from pathlib import Path
 import re
 
 
+REFERENCE_CONTRACT_SCHEMA = 1
+
 def self_check(case, thresholds, token_ids, text):
     from families.llama.tests.test_e2e import _assert_correctness
 
@@ -31,6 +33,8 @@ def run(manifest_path, output, device='cpu'):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from families.llama.tests.test_e2e import _checkpoint, _hf_reference, _thresholds
 
+    if device == 'cpu':
+        torch.set_num_threads(4)
     output = Path(output)
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     raw = Path(manifest_path).read_bytes()
@@ -40,6 +44,7 @@ def run(manifest_path, output, device='cpu'):
     report = {'schema': 1, 'kind': 'reference_contract', 'diagnostic_only': True,
               'checkpoint': manifest['hf_id'], 'revision': manifest['hf_revision'],
               'manifest_sha256': hashlib.sha256(raw).hexdigest(), 'device': device,
+              'cpu_threads': torch.get_num_threads(),
               'cases': [], 'status': 'running', 'qualification': 'not_established'}
     def save():
         (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
