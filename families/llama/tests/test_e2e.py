@@ -8,6 +8,7 @@ from __future__ import annotations
 from tools.e2e_evidence import evidence_stage, record_evidence
 
 import gc
+import hashlib
 import json
 import os
 import re
@@ -18,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from tensorrt_model_connect import BuildRequest, build
+from tensorrt_model_connect.model_support import load_model_metadata, resolve_family
 
 
 _TEST_DIR = Path(__file__).resolve().parent
@@ -103,6 +105,17 @@ def _required_environment(tp_size: int):
     )
     if tp_size > 1:
         assert shutil.which("mpirun"), "selected TP E2E requires mpirun"
+    record_evidence("execution_environment", {
+        "binary": _file_identity(binary),
+        "runtime_root": str(runtime_root),
+        "torch": torch.__version__, "cuda": torch.version.cuda,
+        "gpu": torch.cuda.get_device_name(),
+        "compute_capability": torch.cuda.get_device_capability(),
+        "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+        "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+        "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+    })
     return binary, runtime_root, torch
 
 
@@ -147,6 +160,10 @@ def _thresholds(case_name: str) -> dict[str, float]:
 
 
 def _build_bundle(manifest: dict, model_dir: Path, bundle: Path) -> None:
+    family, support = resolve_family(load_model_metadata(model_dir))
+    assert family == _FAMILY
+    assert manifest["task"] in support.tasks
+    record_evidence("support", {"family": family, "tasks": support.tasks})
     quantization = manifest.get("quantization")
     assert quantization is None or isinstance(quantization, str)
     fp32_layers = tuple(manifest.get("fp32_layers", ()))
@@ -168,7 +185,38 @@ def _build_bundle(manifest: dict, model_dir: Path, bundle: Path) -> None:
     assert bundle.is_file() and bundle.stat().st_size > 0, bundle
 
 
-def _assert_rank_sections(binary: Path, bundle: Path, tp_size: int) -> None:
+def _file_identity(path: Path) -> dict:
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return {"path": str(path), "bytes": path.stat().st_size, "sha256": digest}
+
+
+def _isolated_runtime(runtime_root: Path, destination: Path) -> Path:
+    """Stage the selected loader closure without touching the original build."""
+    destination.mkdir()
+    names = (
+        "libtrtmc_core.so", "libtrtmc_runtime.so",
+        "libtrtmc_backend_trt.so", f"libtrtmc_model_{_FAMILY}.so",
+    )
+    for name in names:
+        source = runtime_root / name
+        assert source.is_file(), source
+        # Copy rather than symlink so $ORIGIN remains inside the isolated root.
+        shutil.copy2(source, destination / name)
+    assert {path.name for path in destination.glob("libtrtmc_model_*.so")} == {
+        f"libtrtmc_model_{_FAMILY}.so"
+    }
+    identity = {
+        "source_root": str(runtime_root),
+        "isolated_root": str(destination),
+        "files": [_file_identity(destination / name) for name in names],
+    }
+    destination.with_suffix(".identity.json").write_text(json.dumps(identity, indent=2) + "\n", encoding="utf-8")
+    record_evidence("runtime", identity)
+    return destination
+
+
+def _assert_rank_sections(binary: Path, bundle: Path, tp_size: int) -> dict:
     inspected = subprocess.run(
         [str(binary), "inspect", str(bundle)],
         check=True,
@@ -179,8 +227,12 @@ def _assert_rank_sections(binary: Path, bundle: Path, tp_size: int) -> None:
     record_evidence("commands", {"argv": getattr(inspected, "args", None)})
     record_evidence("native", {"stdout": getattr(inspected, "stdout", None), "stderr": getattr(inspected, "stderr", None)})
     payload = json.loads(inspected.stdout)
+    bundle.with_suffix(".inspection.json").write_text(inspected.stdout, encoding="utf-8")
+    record_evidence("bundle", {**_file_identity(bundle), "inspection": payload})
     assert payload["family"] == _FAMILY
     assert payload["task"] == "text_generation"
+    assert payload["backend"] == "trt"
+    assert any(name.startswith("engine") and name.endswith(".plan") for name in payload["sections"])
     if tp_size > 1:
         rank_sections = {
             name
@@ -188,6 +240,7 @@ def _assert_rank_sections(binary: Path, bundle: Path, tp_size: int) -> None:
             if name.startswith("engine.rank") and name.endswith(".plan")
         }
         assert rank_sections == {f"engine.rank{rank}.plan" for rank in range(tp_size)}
+    return payload
 
 
 def _native_arguments(bundle: Path, runtime_root: Path, prompt: str, case: dict) -> list[str]:
@@ -244,14 +297,20 @@ def _run_native(
 
     completed = subprocess.run(
         command,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         timeout=600,
         env=environment,
     )
+    # Keep raw execution evidence even when the optional report plugin is disabled.
+    (tmp_path / "native-execution.json").write_text(json.dumps({
+        "argv": command, "returncode": completed.returncode,
+        "stdout": completed.stdout, "stderr": completed.stderr,
+    }, indent=2) + "\n", encoding="utf-8")
     record_evidence("commands", {"argv": getattr(completed, "args", None)})
     record_evidence("native", {"stdout": getattr(completed, "stdout", None), "stderr": getattr(completed, "stderr", None)})
+    completed.check_returncode()
     if tp_size == 1:
         payload = json.loads(completed.stdout)
         payload["runtime_stderr"] = completed.stderr
@@ -368,6 +427,7 @@ def _hf_reference(
     torch,
     *,
     reference=None,
+    diagnostic_dir: Path | None = None,
 ) -> tuple[list[int], str, float | None, str]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -403,6 +463,22 @@ def _hf_reference(
         assert model.dtype == dtypes[reference_precision], "preloaded reference precision differs"
     inputs = _render_prompt(tokenizer, prompt, case).to(model.device)
     prompt_ids = inputs["input_ids"][0].tolist()
+    import transformers
+    from transformers.models.llama import modeling_llama
+
+    reference_execution = {
+        "transformers": transformers.__version__,
+        "implementation": _file_identity(Path(modeling_llama.__file__)),
+        "dtype": str(model.dtype),
+        "attention_implementation": model.config._attn_implementation,
+        "prompt_token_ids": prompt_ids,
+        "attention_mask": inputs["attention_mask"].tolist() if "attention_mask" in inputs else None,
+        "generation_config": model.generation_config.to_dict(),
+        "request": case,
+    }
+    if diagnostic_dir is not None:
+        (diagnostic_dir / "reference-inputs.json").write_text(json.dumps(reference_execution, indent=2) + "\n", encoding="utf-8")
+    record_evidence("reference_execution", reference_execution)
     if "expected_prompt_token_ids" in case:
         assert prompt_ids == case["expected_prompt_token_ids"]
 
@@ -548,11 +624,36 @@ def test_e2e(case_name: str, request, tmp_path: Path) -> None:
     prompt = _prompt(case)
     record_evidence("inputs", {"prompt": prompt})
     bundle = tmp_path / manifest["bundle"]
+    checkpoint_files = {
+        name: _file_identity(model_dir / name)
+        for name in manifest.get("checkpoint_files", ("config.json",))
+    }
+    (tmp_path / "case-inputs.json").write_text(json.dumps({
+        "manifest": manifest, "case": case, "prompt": prompt,
+        "checkpoint": str(model_dir), "binary": _file_identity(binary),
+        "runtime_root": str(runtime_root),
+        "checkpoint_files": checkpoint_files,
+        "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
+    }, indent=2) + "\n", encoding="utf-8")
+    record_evidence("checkpoint_files", checkpoint_files)
+    with evidence_stage("runtime"):
+        runtime_root = _isolated_runtime(runtime_root, tmp_path / "runtime")
 
     with evidence_stage("build"):
         _build_bundle(manifest, model_dir, bundle)
     with evidence_stage("compare"):
-        _assert_rank_sections(binary, bundle, tp_size)
+        inspection = _assert_rank_sections(binary, bundle, tp_size)
+        provenance = inspection.get("provenance")
+        if provenance is not None:
+            record_evidence("bundle_provenance", provenance)
+            checkpoint_identity = provenance.get("checkpoint")
+            if checkpoint_identity is not None:
+                assert checkpoint_identity["hf_id"] == manifest["hf_id"]
+                if manifest.get("hf_revision"):
+                    assert checkpoint_identity["revision"] == manifest["hf_revision"]
+            for field in ("precision", "max_sequence_length", "tensor_parallel_size"):
+                assert provenance["build"][field] == manifest[field]
+            assert provenance["build"]["max_batch_size"] == manifest.get("max_batch_size", 1)
     with evidence_stage("native"):
         payload = _run_native(
             binary,
@@ -615,9 +716,21 @@ def test_e2e(case_name: str, request, tmp_path: Path) -> None:
             prompt,
             payload["token_ids"],
             torch,
+            diagnostic_dir=tmp_path,
         )
     record_evidence("reference", {"reference_ids": reference[0], "reference_text": reference[1], "sampling_support": reference[2], "actual_decoded": reference[3]})
     if not _is_sampling(case):
         _record_text_diagnostics(payload["token_ids"], reference[0])
+        metrics = {
+            "normalized_edit_distance": _normalized_edit_distance(str(payload["text"]), reference[1]),
+            "contract_ned_threshold": _text_threshold(case, _thresholds(case_name)),
+            "native_token_ids": payload["token_ids"],
+            "reference_token_ids": reference[0],
+            "native_text": payload["text"], "reference_text": reference[1],
+            "bundle": _file_identity(bundle),
+            "reference_precision": case.get("reference_precision", manifest.get("reference_precision", manifest["precision"])),
+        }
+        (tmp_path / "comparison.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+        record_evidence("comparison_metrics", metrics)
     with evidence_stage("compare"):
         _assert_correctness(payload, case, record_evidence("thresholds", _thresholds(case_name)), *reference)
