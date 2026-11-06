@@ -673,22 +673,24 @@ class BpeTokenizer final : public ITokenizer {
 
     std::vector<int32_t> encode(const std::string& text, bool add_special_tokens) const override {
         std::vector<int32_t> result;
-        if (text.empty())
-            return result;
 
         if (add_special_tokens) {
             for (int32_t bos_id : mPostBosIds)
                 result.push_back(bos_id);
         }
 
-        auto segments = split_added_tokens(text);
-        bool first_segment = true;
-        for (const auto& seg : segments) {
-            if (seg.added_id >= 0)
-                result.push_back(seg.added_id);
-            else
-                encode_segment(seg.text, result, first_segment);
-            first_segment = false;
+        // Post-processing still frames an empty sequence. Do not normalize an
+        // empty text segment: SentencePiece could synthesize a whitespace token.
+        if (!text.empty()) {
+            auto segments = split_added_tokens(text);
+            bool first_segment = true;
+            for (const auto& seg : segments) {
+                if (seg.added_id >= 0)
+                    result.push_back(seg.added_id);
+                else
+                    encode_segment(seg.text, result, first_segment);
+                first_segment = false;
+            }
         }
 
         if (add_special_tokens) {

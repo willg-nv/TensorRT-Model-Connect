@@ -289,7 +289,8 @@ void LlamaKvCache::prepare_step(TensorMap& inputs, int32_t seq_len) {
         write_native_kv_inputs(inputs, seq_len);
         return;
     }
-    if (seq_len > 1)
+    // Engine role is independent of token count: prefill profiles also admit Sq=1.
+    if (prefill_binding_ || seq_len > 1)
         write_batched_mask(inputs, seq_len);
     else
         write_decode_mask(inputs);
@@ -307,6 +308,7 @@ void LlamaKvCache::prepare_bidirectional_step(TensorMap& inputs, int32_t seq_len
 }
 
 void LlamaKvCache::bind_to(ITrtModule& module) {
+    prefill_binding_ = false;
     bound_module_ = &module;
     has_position_input_ = module.has_input(names_.position_id);
     if (configure_binding_mode(module)) {
@@ -352,6 +354,7 @@ void LlamaKvCache::bind_to(ITrtModule& module) {
 }
 
 void LlamaKvCache::bind_cache_inputs(ITrtModule& module) {
+    prefill_binding_ = true;
     bound_module_ = &module;
     has_position_input_ = module.has_input(names_.position_id);
     if (configure_binding_mode(module)) {

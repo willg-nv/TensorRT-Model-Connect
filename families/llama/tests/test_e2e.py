@@ -762,3 +762,10 @@ def test_e2e(case_name: str, request, tmp_path: Path) -> None:
         record_evidence('precision_diagnostics', diagnostic)
     with evidence_stage("compare"):
         _assert_correctness(payload, case, record_evidence("thresholds", _thresholds(case_name)), *reference)
+    if precision_diagnostic and case_name == 'tinyllama-1.1b-raw-continuation':
+        from .lifecycle import exercise_lifecycle
+
+        with evidence_stage('native'):
+            lifecycle = exercise_lifecycle(bundle, runtime_root, model_dir, manifest,
+                                           payload, tmp_path / 'lifecycle')
+        record_evidence('lifecycle', lifecycle)

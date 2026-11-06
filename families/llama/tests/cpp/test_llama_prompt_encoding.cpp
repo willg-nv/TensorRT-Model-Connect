@@ -40,6 +40,11 @@ int main() {
           "chat prompt uses complete template without tokenizer BOS");
     check(trtmc::llama_encode_prompt(*tokenizer, "zephyr", "he", false, false) == raw,
           "chat encoding does not mutate subsequent raw encoding");
+    check(trtmc::llama_encode_prompt(*tokenizer, "zephyr", "", false, false) ==
+              std::vector<std::int32_t>{1},
+          "empty raw input retains the checkpoint BOS frame");
+    check(tokenizer->encode("", false).empty(),
+          "empty input without special tokens has no synthetic whitespace");
     const auto embedded = trtmc::llama_encode_prompt(*tokenizer, "llama3", "he", true, true);
     check(!embedded.empty() && embedded.front() == 9 &&
               std::count(embedded.begin(), embedded.end(), 9) == 1 &&

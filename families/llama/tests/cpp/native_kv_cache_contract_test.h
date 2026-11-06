@@ -218,6 +218,47 @@ bool rejects_native_contract(cudaStream_t stream, Mutate mutate) {
     return false;
 }
 
+// A one-token prefill still uses the prefill engine's dynamic mask profile.
+// Check the actual host inputs across prefill/decode bindings and logical reset.
+template <typename Cache, typename Check>
+void check_single_token_prefill_mask(cudaStream_t stream, Check check) {
+    Cache cache(1, 4, 2, stream, DType::kFloat16);
+    NativeKvModuleStub prefill(stream, 1, 4, 1, 2, DType::kFloat16, false, nullptr, 4, 16, {},
+                               false, true);
+    prefill.set_tensor("attention_mask", {-1, -1}, DType::kFloat32);
+    NativeKvModuleStub decode(stream, 1, 4, 1, 2, DType::kFloat16, false);
+    const auto verify = [&](const TensorMap& inputs, const std::vector<float>& expected,
+                            int32_t position) {
+        const auto& mask = inputs.at("attention_mask");
+        check(mask.shape == std::vector<int64_t>({1, 5}) && mask.dtype == DType::kFloat32,
+              "single-token mask is FP32 [Sq, cache_capacity + Sq]");
+        const auto* values = static_cast<const float*>(mask.data);
+        check(std::vector<float>(values, values + 5) == expected,
+              "single-token attention exposes valid prefix and current token only");
+        check(scalar(inputs, "position_id") == position,
+              "single-token position follows the logical cache length");
+    };
+    const std::vector<float> fresh{-10000.0F, -10000.0F, -10000.0F, -10000.0F, 0.0F};
+    const std::vector<float> prefix{0.0F, 0.0F, -10000.0F, -10000.0F, 0.0F};
+    TensorMap inputs;
+    cache.bind_cache_inputs(prefill);
+    cache.prepare_step(inputs, 1);
+    verify(inputs, fresh, 0);
+    cache.set_position(2);
+    inputs.clear();
+    cache.prepare_step(inputs, 1);
+    verify(inputs, prefix, 2);
+    cache.bind_to(decode);
+    inputs.clear();
+    cache.prepare_step(inputs);
+    verify(inputs, prefix, 2);
+    cache.reset();
+    cache.bind_cache_inputs(prefill);
+    inputs.clear();
+    cache.prepare_step(inputs, 1);
+    verify(inputs, fresh, 0);
+}
+
 template <typename Pipeline, typename Cache, typename Config>
 int run_native_kv_contract_tests(const char* model) {
     int failures = 0;
@@ -230,6 +271,8 @@ int run_native_kv_contract_tests(const char* model) {
     cudaStream_t stream = nullptr;
     if (cudaStreamCreate(&stream) != cudaSuccess)
         return 1;
+
+    check_single_token_prefill_mask<Cache>(stream, check);
 
     check(rejects_native_contract<Cache>(
               stream,
