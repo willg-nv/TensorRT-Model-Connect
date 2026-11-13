@@ -23,6 +23,7 @@ inclusion and redistribution in this repository under the Apache License 2.0:
 - `families/phi4_multimodal/tests/data/test_img.jpeg`
 - `families/qwen_image/tests/data/test_img.jpeg`
 - `families/qwen_vl/tests/data/test_img.jpeg`
+- `families/owlvit/tests/data/test_img.jpeg`
 - `families/rt_detr/tests/data/test_img.jpeg`
 - `families/sam/tests/data/test_img.jpeg`
 - `families/sam3/tests/data/test_img.jpeg`

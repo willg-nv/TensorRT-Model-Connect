@@ -1,0 +1,19 @@
+{
+  "name": "owlvit-base-patch32",
+  "hf_id": "google/owlvit-base-patch32",
+  "hf_revision": "cbc355fb364588351c5d51c7f74465e8e7ec6f72",
+  "bundle": "owlvit-base-patch32.bundle",
+  "family": "owlvit",
+  "task": "image_text_to_boxes",
+  "precision": "fp32",
+  "testcases": [
+    {
+      "name": "owlvit-base-patch32",
+      "premerge": true,
+      "test_image": "data/test_img.jpeg",
+      "prompt": "a car. a mountain. the sky. the ocean.",
+      "score_threshold": 0.08
+    }
+  ],
+  "tensor_parallel_size": 1
+}
