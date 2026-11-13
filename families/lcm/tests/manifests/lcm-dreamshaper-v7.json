@@ -1,0 +1,22 @@
+{
+  "name": "lcm-dreamshaper-v7",
+  "hf_id": "SimianLuo/LCM_Dreamshaper_v7",
+  "hf_revision": "a85df6a8bd976cdd08b4fd8f3b73f229c9e54df5",
+  "bundle": "lcm-dreamshaper-v7.bundle",
+  "family": "lcm",
+  "task": "image_generation",
+  "precision": "fp32",
+  "image_height": 512,
+  "image_width": 512,
+  "tensor_parallel_size": 1,
+  "testcases": [
+    {
+      "name": "lcm-dreamshaper-v7",
+      "premerge": true,
+      "prompt": "A watercolor painting of a small red cabin beside a quiet lake, pine trees and mountains.",
+      "guidance_scale": 8.0,
+      "seed": 42,
+      "num_inference_steps": 1
+    }
+  ]
+}
