@@ -1,0 +1,23 @@
+{
+  "name": "clap-htsat-fused-text",
+  "hf_id": "laion/clap-htsat-fused",
+  "hf_revision": "365dea6ef167def6676140ed93bbc43f84dabb28",
+  "family": "clap",
+  "bundle": "clap-htsat-fused-text.bundle",
+  "task": "text_to_embedding",
+  "precision": "fp32",
+  "max_sequence_length": 128,
+  "tensor_parallel_size": 1,
+  "testcases": [
+    {
+      "name": "clap-htsat-fused-text",
+      "premerge": true,
+      "inputs": [
+        "A dog barking outside.",
+        "A car engine running.",
+        "Quiet rain falling on the roof.",
+        "A <pad> dog"
+      ]
+    }
+  ]
+}
