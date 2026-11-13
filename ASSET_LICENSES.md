@@ -13,6 +13,7 @@ provided by the project maintainer who took the photograph and authorized its
 inclusion and redistribution in this repository under the Apache License 2.0:
 
 - `families/chinese_clip/tests/data/test_img.jpeg`
+- `families/vilt/tests/data/test_img.jpeg`
 - `families/clipseg/tests/data/test_img.jpeg`
 - `families/detr/tests/data/test_img.jpeg`
 - `families/dinov2_with_registers/tests/data/test_img.jpeg`

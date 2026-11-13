@@ -1,0 +1,22 @@
+{
+  "name": "vilt-b32-finetuned-vqa",
+  "hf_id": "dandelin/vilt-b32-finetuned-vqa",
+  "hf_revision": "d0a1f6ab88522427a7ae76ceb6e1e1e7b68a1d08",
+  "bundle": "vilt-b32-vqa.bundle",
+  "family": "vilt",
+  "task": "images_text_to_text",
+  "precision": "fp32",
+  "max_sequence_length": 40,
+  "tensor_parallel_size": 1,
+  "testcases": [
+    {
+      "name": "vilt-b32-finetuned-vqa",
+      "premerge": true,
+      "questions": [
+        "What type of vehicle is shown?",
+        "What color is the vehicle?",
+        "How many wheels are visible?"
+      ]
+    }
+  ]
+}
