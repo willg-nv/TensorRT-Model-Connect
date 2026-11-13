@@ -1,0 +1,22 @@
+{
+  "name": "mellum2.1-12b-thinking",
+  "hf_id": "JetBrains/Mellum2.1-12B-A2.5B-Thinking",
+  "hf_revision": "92ddae9fc7665e9f801d141d2e5a6b2caf2460c4",
+  "bundle": "mellum2.1-12b-thinking.bundle",
+  "family": "mellum",
+  "task": "text_continuation",
+  "precision": "fp32",
+  "max_sequence_length": 128,
+  "tensor_parallel_size": 1,
+  "testcases": [
+    {
+      "name": "mellum2.1-12b-thinking",
+      "premerge": true,
+      "max_new_tokens": 16,
+      "prompts": [
+        "def add(a, b):\n    \"\"\"Return the sum of a and b.\"\"\"\n    return",
+        "def square(x):\n    \"\"\"Return x squared.\"\"\"\n    return"
+      ]
+    }
+  ]
+}
